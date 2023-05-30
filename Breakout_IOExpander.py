@@ -1,4 +1,6 @@
 import time
+import board
+import busio
 from adafruit_bus_device.i2c_device import I2CDevice
 
 IOE_DEFAULT_ADDRESS = 0x18
@@ -29,6 +31,23 @@ class BreakoutIOExpander:
     IOE_PIN_OD = 0x03
     IOE_PIN_PWM = 0x04
     IOE_PIN_ADC = 0x0A
+    
+    PxM1 = [0x71, 0x73, -1, 0x6c]
+    PxM2 = [0x72, 0x74, -1, 0x6d]
+    Px = [0x40, 0x50, -1, 0x70]
+    PxS = [0xc2, 0xc4, -1, 0xc0]
+    MASK_P = [0x00, 0x01, -1, 0x03]
+    PWML = [0x9a, 0x9b, 0x9c, 0x9d, 0xca, 0xcb]
+    PWMH = [0x92, 0x93, 0x94, 0x95, 0xc7, 0xc8]
+    ADCRL = [0x40, 0x42, 0x44, 0x46, 0x48, 0x4A, 0x4C, 0x4E]
+    ADCRH = [0x41, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4D, 0x4F]
+    
+    MODE_INPUT = "input"
+    MODE_OUTPUT = "output"
+    MODE_PULLUP = "pullup"
+    MODE_PWM = "pwm"
+    MODE_ADC = "adc"
+    MODE_PULLDOWN = "pulldown"
 
     def __init__(self, i2c, address=IOE_DEFAULT_ADDRESS):
         self.i2c_device = I2CDevice(i2c, address)
@@ -47,7 +66,7 @@ class BreakoutIOExpander:
             return [(data[0] >> i) & 0x01 for i in range(1)]
         else:
             print("result is: ", data)
-            return list(data[0:1])
+            return data[0]
 
     def _read_register12(self, reg_l, reg_h):
         #Read two (4+8bit) registers from the device, as a single read if they are consecutive.
@@ -77,6 +96,7 @@ class BreakoutIOExpander:
         with self.i2c_device as i2c:
             buffer = bytearray([register]) + bytearray(data)
             i2c.write(buffer)
+            print("Just wrote {}".format(buffer))
     
     def _write_register16(self, reg_l, reg_h, data):
     #"Write two (8+8bit) registers to the device, as a single write if they are consecutive."
@@ -151,50 +171,7 @@ class BreakoutIOExpander:
         self._write_register(IOE_REG_PWM_PERIOD + (channel * 2), [period >> 8, period & 0xFF])
 
     def set_mode(self, pin, mode):
-        port = pin // 8
-        pin_bit = pin % 8
-        gpio_mode = mode & 0x03
-        pullup_mode = (mode >> 4) & 0b1
-        adc_mode = (mode >> 1) & 0b1
-        pwm_mode = (mode >> 2) & 0b1
-        print("pwm_mode =", pwm_mode)
-        print("adc_mode =", adc_mode)
-        print("pullup_mode =", pullup_mode)
-        print("gpio_mode =", gpio_mode)
-        print("current pin is {}, mode is {}".format(pin, mode))
-        # Set the GPIO mode
-        gpio_dir = self._read_register(IOE_REG_GPIO_DIR + port)[0]
-        if mode == self.IOE_PIN_OUT:
-            gpio_dir |= (1 << pin_bit)
-        else:
-            gpio_dir &= ~(1 << pin_bit)
-        self._write_register(IOE_REG_GPIO_DIR + port, [gpio_dir])
-
-        # Set the pull-up mode
-        pullup_en = self._read_register(self.IOE_REG_PULL_UP_ENABLE + port)[0]
-        if mode == self.IOE_PIN_IN_PU:
-            pullup_en |= (1 << pin_bit)
-        else:
-            pullup_en &= ~(1 << pin_bit)
-        self._write_register(self.IOE_REG_PULL_UP_ENABLE + port, [pullup_en])
-
-        # Set the ADC mode
-        adc_ctrl = self._read_register(self.IOE_REG_ADC_CTRL)[0]
-        if mode == self.IOE_PIN_ADC:
-            adc_ctrl |= (1 << pin_bit)
-        else:
-            adc_ctrl &= ~(1 << pin_bit)
-        self._write_register(self.IOE_REG_ADC_CTRL, [adc_ctrl])
-
-
-        # Set the PWM mode
-        pwm_cfg = self._read_register(self.IOE_REG_PWM_CFG)[0]
-        if mode == self.IOE_PIN_PWM:
-            pwm_cfg |= (1 << pin_bit)
-        else:
-            pwm_cfg &= ~(1 << pin_bit)
-        self._write_register(self.IOE_REG_PWM_CFG, [pwm_cfg])
-#		  port = pin // 8
+#         port = pin // 8
 #         pin_bit = pin % 8
 #         gpio_mode = mode & 0x03
 #         pullup_mode = (mode >> 4) & 0b1
@@ -207,7 +184,7 @@ class BreakoutIOExpander:
 #         print("current pin is {}, mode is {}".format(pin, mode))
 #         # Set the GPIO mode
 #         gpio_dir = self._read_register(IOE_REG_GPIO_DIR + port)[0]
-#         if gpio_mode == self.IOE_PIN_OUT:
+#         if mode == self.IOE_PIN_OUT:
 #             gpio_dir |= (1 << pin_bit)
 #         else:
 #             gpio_dir &= ~(1 << pin_bit)
@@ -215,7 +192,7 @@ class BreakoutIOExpander:
 # 
 #         # Set the pull-up mode
 #         pullup_en = self._read_register(self.IOE_REG_PULL_UP_ENABLE + port)[0]
-#         if pullup_mode:
+#         if mode == self.IOE_PIN_IN_PU:
 #             pullup_en |= (1 << pin_bit)
 #         else:
 #             pullup_en &= ~(1 << pin_bit)
@@ -223,7 +200,7 @@ class BreakoutIOExpander:
 # 
 #         # Set the ADC mode
 #         adc_ctrl = self._read_register(self.IOE_REG_ADC_CTRL)[0]
-#         if adc_mode:
+#         if mode == self.IOE_PIN_ADC:
 #             adc_ctrl |= (1 << pin_bit)
 #         else:
 #             adc_ctrl &= ~(1 << pin_bit)
@@ -232,11 +209,44 @@ class BreakoutIOExpander:
 # 
 #         # Set the PWM mode
 #         pwm_cfg = self._read_register(self.IOE_REG_PWM_CFG)[0]
-#         if pwm_mode:
+#         if mode == self.IOE_PIN_PWM:
 #             pwm_cfg |= (1 << pin_bit)
 #         else:
 #             pwm_cfg &= ~(1 << pin_bit)
 #         self._write_register(self.IOE_REG_PWM_CFG, [pwm_cfg])
+        if pin < 1 or pin > 14:
+                raise ValueError("Invalid pin")
+
+        if mode not in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PWM, self.MODE_ADC]:
+                raise ValueError("Invalid mode")
+
+        if mode == self.MODE_PWM and pin > 6:
+                raise ValueError("Only pins 1-6 can be set as PWM")
+
+        if mode == self.MODE_ADC and pin < 7:
+                raise ValueError("Only pins 7-14 can be set as ADC")
+
+        port = (pin - 1) // 8
+        bit = (pin - 1) % 8
+
+        if mode == self.MODE_INPUT:
+                self._write_register(self.PxM1[port], 0 << bit)
+                self._write_register(self.PxM2[port], 0 << bit)
+        elif mode == self.MODE_OUTPUT:
+                self._write_register(self.PxM1[port], 0 << bit)
+                self._write_register(self.PxM2[port], 1 << bit)
+        elif mode == self.MODE_PULLUP:
+                self._write_register(self.PxM1[port], 1 << bit)
+                self._write_register(self.PxM2[port], 0 << bit)
+                self._write_register(self.Px[port], 1 << bit)
+        elif mode == self.MODE_PWM:
+                self._write_register(self.PxM1[port], 0 << bit)
+                self._write_register(self.PxM2[port], 1 << bit)
+                self._write_register(self.PWML[pin - 1], 0xFF)
+                self._write_register(self.PWMH[pin - 1], 0xFF)
+        elif mode == self.MODE_ADC:
+                self._write_register(self.PxM1[port], 1 << bit)
+                self._write_register(self.PxM2[port], 0 << bit)
 
         
 
@@ -301,44 +311,117 @@ class BreakoutIOExpander:
         data = config.to_bytes(1, 'big')
         self._write_register(pin_reg, data)
 
-    def _get_pin_value(self, pin):
-        if pin < 1 or pin > IOE_NUM_PINS:
-            raise ValueError("Invalid pin")
+    def _get_pin_value(self, pin, mode):
 
-        io_pin = self.get_pin_mode(pin)
-        print("getting pin value for pin {}: {}".format(pin, io_pin))
-        
-        if io_pin == self.IOE_PIN_ADC:
-            if io_pin.adc_channel > 8:
-                self._write_register(self.IOE_REG_ADC_CTRL, 1 << (io_pin.adc_channel - 8))
+        # Mapping from physical pin number to logical pin and port
+        pin_map = {
+#             1: (1, 5),
+#             2: (1, 6),
+#             3: (1, 7),
+#             4: (1, 8),
+#             5: (2, 1),
+#             6: (2, 2),
+#             7: (2, 3),
+#             8: (2, 4),
+#             9: (3, 1),
+#             10: (3, 2),
+#             11: (3, 3),
+#             12: (3, 4),
+#             13: (4, 1),
+#             14: (4, 2),
+            1: (1, 5),
+            2: (1, 0),
+            3: (1, 2),
+            4: (1, 4),
+            5: (0, 0),
+            6: (0, 1),
+            7: (1, 1),
+            8: (0, 3),
+            9: (0, 4),
+            10: (3, 0),
+            11: (0, 6),
+            12: (0, 5),
+            13: (0, 7),
+            14: (1, 7),
+        }
+
+        # Check if the pin number is valid
+        if pin not in pin_map:
+            raise ValueError("Invalid pin number")
+
+        # Get the logical pin and port
+        port, pin = pin_map[pin]
+
+        # Check if the mode is valid
+        if mode not in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PULLDOWN, self.MODE_PWM, self.MODE_ADC]:
+            raise ValueError("Invalid mode")
+
+        # Form the register commands
+        if mode in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PULLDOWN]:
+            if port == 3:  # PxM1 is used for Port 3
+                register = self.PxM1[port]
+            elif port == 4:  # PxM2 is used for Port 4
+                register = self.PxM2[port]
             else:
-                self._write_register(self.IOE_REG_ADC_CTRL, 1 << io_pin.adc_channel)
+                register = self.Px[port]
+            bit = (pin - 1) % 8
+            print("register on line 354 = {}".format(register))
+            
+            value = self._read_register(register) & 0xFF
+            print("and the result is:{}".format(bool(value & (1 << bit))))
+            return bool(value & (1 << bit))
+        
+        elif mode == self.MODE_PWM:
+            register = self.PWMH[pin - 1]
+            value = self._read_register(register)
+            return value
+        
+        elif mode == self.MODE_ADC:
+            register_l = self.ADCRL[pin - 1]
+            register_h = self.ADCRH[pin - 1]
+            value_l = self._read_register12(register_l, register_h)
+#             value_h = self._read_register12(register_h)
+#             return (value_h << 12) | value_l
+            return value_l
 
-            con0value = self._read_register(self.IOE_REG_ADC_CTRL)[0]
-            con0value = con0value & ~0x0F
-            con0value = con0value | io_pin.adc_channel
-
-            con0value = con0value & ~(1 << 7)  # ADCF - Clear the conversion complete flag
-            con0value = con0value | (1 << 6)  # ADCS - Set the ADC conversion start flag
-            self._write_register(self.IOE_REG_ADC_CTRL, con0value)
-
-            adc_timeout = 1.0  # Default timeout of 1.0 second
-            t_start = time.monotonic()
-            while not self._read_register(self.IOE_REG_ADC_CTRL)[0] & (1 << 7):
-                if time.monotonic() - t_start >= adc_timeout:
-                    raise RuntimeError("Timeout waiting for ADC conversion!")
-                time.sleep(0.001)
-
-            reading = self._read_register16(self.IOE_REG_ADCRL, self.IOE_REG_ADCRH)
-            return (reading / 4095.0) * self._vref
-        elif io_pin == self.IOE_PIN_PWM:
-            return None
-        else:
-            #if self._debug:
-            #    print("Reading IO from pin {}".format(pin))
-            pv = self._read_register(IOE_REG_GPIO)[0] & (1 << pin)
-
-            return bool(pv)
+#         if pin < 1 or pin > IOE_NUM_PINS:
+#             raise ValueError("Invalid pin")
+# 
+#         io_pin = self.get_pin_mode(pin)
+#         print("getting pin value for pin {}: {}".format(pin, io_pin))
+#         
+#         if io_pin == self.IOE_PIN_ADC:
+#             if io_pin.adc_channel > 8:
+#                 self._write_register(self.IOE_REG_ADC_CTRL, 1 << (io_pin.adc_channel - 8))
+#             else:
+#                 self._write_register(self.IOE_REG_ADC_CTRL, 1 << io_pin.adc_channel)
+# 
+#             con0value = self._read_register(self.IOE_REG_ADC_CTRL)[0]
+#             con0value = con0value & ~0x0F
+#             con0value = con0value | io_pin.adc_channel
+# 
+#             con0value = con0value & ~(1 << 7)  # ADCF - Clear the conversion complete flag
+#             con0value = con0value | (1 << 6)  # ADCS - Set the ADC conversion start flag
+#             self._write_register(self.IOE_REG_ADC_CTRL, con0value)
+# 
+#             adc_timeout = 1.0  # Default timeout of 1.0 second
+#             t_start = time.monotonic()
+#             while not self._read_register(self.IOE_REG_ADC_CTRL)[0] & (1 << 7):
+#                 if time.monotonic() - t_start >= adc_timeout:
+#                     raise RuntimeError("Timeout waiting for ADC conversion!")
+#                 time.sleep(0.001)
+# 
+#             reading = self._read_register16(self.IOE_REG_ADCRL, self.IOE_REG_ADCRH)
+#             return (reading / 4095.0) * self._vref
+#         elif io_pin == self.IOE_PIN_PWM:
+#             return None
+#         else:
+#             #if self._debug:
+#             #    print("Reading IO from pin {}".format(pin))
+#             pin_reg = IOE_REG_GPIO + (pin // 8)
+#             pin_bit = 1 << (pin % 8)
+#             current_value = self._read_register(pin_reg)[0]
+#             return bool(current_value & pin_bit)
 
     def _set_pin_value(self, port, pin, value):
         if port < 0 or port > 1 or pin < 0 or pin > 7:
@@ -359,5 +442,5 @@ class BreakoutIOExpander:
     def set_pin(self, pin, value):
         self._set_pin_value(pin, value)
 
-    def get_pin(self, pin):
-        return self._get_pin_value(pin)
+    def get_pin(self, pin, mode):
+        return self._get_pin_value(pin, mode)
