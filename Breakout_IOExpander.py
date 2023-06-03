@@ -25,12 +25,20 @@ class BreakoutIOExpander:
     IOE_REG_OUTPUT_STATE = 0x50
     IOE_REG_PWM_CFG = 0x70
 
-    IOE_PIN_IN = 0x00
-    IOE_PIN_IN_PU = 0x10
-    IOE_PIN_OUT = 0x02
-    IOE_PIN_OD = 0x03
-    IOE_PIN_PWM = 0x04
-    IOE_PIN_ADC = 0x0A
+    PIN_MODE_ADC = 0b01010
+    PIN_MODE_PWM = 0b00101
+    PIN_MODE_OD = 0b00011
+    PIN_MODE_PU = 0b10000
+    PIN_MODE_IN = 0b00010
+    PIN_MODE_PP = 0b00001
+    PIN_MODE_QB = 0b00000
+    PIN_MODE_IO = 0b00000
+    
+    TYPE_IO = 0b00
+    TYPE_PWM = 0b01
+    TYPE_ADC = 0b10
+    TYPE_ADC_OR_PWM = 0b11
+    
     
     PxM1 = [0x71, 0x73, -1, 0x6c]
     PxM2 = [0x72, 0x74, -1, 0x6d]
@@ -57,12 +65,12 @@ class BreakoutIOExpander:
     REG_MASK_P1 = 0x01
     REG_MASK_P3 = 0x03
     
-    MODE_INPUT = "input"
-    MODE_OUTPUT = "output"
-    MODE_PULLUP = "pullup"
-    MODE_PWM = "pwm"
-    MODE_ADC = "adc"
-    MODE_PULLDOWN = "pulldown"
+    MODE_IO = PIN_MODE_IO
+    MODE_OUTPUT = PIN_MODE_PP
+    MODE_PULLUP = PIN_MODE_PU
+    MODE_PWM = PIN_MODE_PWM
+    MODE_ADC = PIN_MODE_ADC
+    MODE_INPUT = PIN_MODE_IN
 
     ADCCON0 = 0xa8
     ADCCON1 = 0xa1
@@ -103,7 +111,6 @@ class BreakoutIOExpander:
         if register == self.IOE_REG_ADC_CTRL:
             return [(data[0] >> i) & 0x01 for i in range(1)]
         else:
-            print("result is: ", data)
             return data[0]
 
     def _read_register12(self, reg_l, reg_h):
@@ -209,49 +216,7 @@ class BreakoutIOExpander:
         self._write_register(IOE_REG_PWM_PERIOD + (channel * 2), [period >> 8, period & 0xFF])
 
     def set_mode(self, pin, mode):
-#         port = pin // 8
-#         pin_bit = pin % 8
-#         gpio_mode = mode & 0x03
-#         pullup_mode = (mode >> 4) & 0b1
-#         adc_mode = (mode >> 1) & 0b1
-#         pwm_mode = (mode >> 2) & 0b1
-#         print("pwm_mode =", pwm_mode)
-#         print("adc_mode =", adc_mode)
-#         print("pullup_mode =", pullup_mode)
-#         print("gpio_mode =", gpio_mode)
-#         print("current pin is {}, mode is {}".format(pin, mode))
-#         # Set the GPIO mode
-#         gpio_dir = self._read_register(IOE_REG_GPIO_DIR + port)[0]
-#         if mode == self.IOE_PIN_OUT:
-#             gpio_dir |= (1 << pin_bit)
-#         else:
-#             gpio_dir &= ~(1 << pin_bit)
-#         self._write_register(IOE_REG_GPIO_DIR + port, [gpio_dir])
-# 
-#         # Set the pull-up mode
-#         pullup_en = self._read_register(self.IOE_REG_PULL_UP_ENABLE + port)[0]
-#         if mode == self.IOE_PIN_IN_PU:
-#             pullup_en |= (1 << pin_bit)
-#         else:
-#             pullup_en &= ~(1 << pin_bit)
-#         self._write_register(self.IOE_REG_PULL_UP_ENABLE + port, [pullup_en])
-# 
-#         # Set the ADC mode
-#         adc_ctrl = self._read_register(self.IOE_REG_ADC_CTRL)[0]
-#         if mode == self.IOE_PIN_ADC:
-#             adc_ctrl |= (1 << pin_bit)
-#         else:
-#             adc_ctrl &= ~(1 << pin_bit)
-#         self._write_register(self.IOE_REG_ADC_CTRL, [adc_ctrl])
-# 
-# 
-#         # Set the PWM mode
-#         pwm_cfg = self._read_register(self.IOE_REG_PWM_CFG)[0]
-#         if mode == self.IOE_PIN_PWM:
-#             pwm_cfg |= (1 << pin_bit)
-#         else:
-#             pwm_cfg &= ~(1 << pin_bit)
-#         self._write_register(self.IOE_REG_PWM_CFG, [pwm_cfg])
+
         if pin < 1 or pin > 14:
                 raise ValueError("Invalid pin")
 
@@ -284,28 +249,32 @@ class BreakoutIOExpander:
         port, pin = pin_map[pin]
 
         schmitt_state = True
+        gpio_mode = mode & 0b11;
+        io_type = (mode >> 2) & 0b11
+        initialState = mode >> 4
         
-        if mode == self.MODE_INPUT:
-                self._write_register(self.PxM1[port], 0 << pin)
-                self._write_register(self.PxM2[port], 0 << pin)
-                self.change_bit(self.PxS[port], pin, schmitt_state )
-        elif mode == self.MODE_OUTPUT:
-                self._write_register(self.PxM1[port], 0 << pin)
-                self._write_register(self.PxM2[port], 1 << pin)
-        elif mode == self.MODE_PULLUP:
-                self._write_register(self.PxM1[port], 1 << pin)
-                self._write_register(self.PxM2[port], 0 << pin)
-                self._write_register(self.Px[port], 1 << pin)
-                self.change_bit(self.PxS[port], pin, schmitt_state )
-        elif mode == self.MODE_PWM:
+        
+        
+        if mode == self.MODE_PWM:
                 self._write_register(self.PxM1[port], 0 << pin)
                 self._write_register(self.PxM2[port], 1 << pin)
                 self._write_register(self.PWML[pin - 1], 0xFF)
                 self._write_register(self.PWMH[pin - 1], 0xFF)
-        elif mode == self.MODE_ADC:
-                self._write_register(self.PxM1[port], 1 << pin)
-                self._write_register(self.PxM2[port], 0 << pin)
-
+       
+        pm1 = self._read_register(self.PxM1[port])
+        pm2 = self._read_register(self.PxM2[port])
+        pm1 &= 255 - (1 << pin)
+        pm2 &= 255 - (1 << pin)
+       
+        pm1 |= (gpio_mode >>1) << pin
+        pm2 |= (gpio_mode & 0b1) << pin
+        
+        self._write_register(self.PxM1[port], pm1)
+        self._write_register(self.PxM2[port], pm2)
+        
+        if mode == self.MODE_INPUT or self.MODE_PULLUP:
+                self.change_bit(self.PxS[port], pin, schmitt_state )
+        self._write_register(self.Px[port], (initialState <<3) | pin)
         
 
         
@@ -332,7 +301,8 @@ class BreakoutIOExpander:
         
 
     def _get_pin_value(self, pin, mode):
-
+        print("Calling get_pin_value, pin: {}, mode: {}".format(pin, mode))
+              
         # Mapping from physical pin number to logical pin and port
         pin_map = {
             1: (1, 5),
@@ -350,7 +320,9 @@ class BreakoutIOExpander:
             13: (0, 7),
             14: (1, 7),
         }
-
+        if mode == self.MODE_ADC:
+            current_adc_channel = self.adc_channel[pin]
+        
         # Check if the pin number is valid
         if pin not in pin_map:
             raise ValueError("Invalid pin number")
@@ -359,11 +331,11 @@ class BreakoutIOExpander:
         port, pin = pin_map[pin]
 
         # Check if the mode is valid
-        if mode not in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PULLDOWN, self.MODE_PWM, self.MODE_ADC]:
+        if mode not in [self.MODE_IO, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_INPUT, self.MODE_PWM, self.MODE_ADC]:
             raise ValueError("Invalid mode")
 
         # Form the register commands
-        if mode in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PULLDOWN]:
+        if mode in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_IO]:
             if port == 3:  # PxM1 is used for Port 3
                 register = self.PxM1[port]
             elif port == 4:  # PxM2 is used for Port 4
@@ -386,9 +358,10 @@ class BreakoutIOExpander:
                 register_l = self.ADCRL[pin - 1]
                 register_h = self.ADCRH[pin - 1]
                 self.clear_bits(self.ADCCON0, 0x0f)
-                self.set_bits(self.ADCCON0, self.adc_channel[pin])
+                print("setting bits on pin {}".format(pin))
+                self.set_bits(self.ADCCON0, current_adc_channel)
                 self._write_register(self.AINDIDS, 0)
-                self.set_bit(self.AINDIDS, self.adc_channel[pin])
+                self.set_bit(self.AINDIDS, current_adc_channel)
                 self.set_bit(self.ADCCON1, 0)
                 
                 self.clear_bit(self.ADCCON0, 7) #ADCF - clears the conversion complete flag
@@ -440,7 +413,7 @@ class BreakoutIOExpander:
         
     def clear_bits(self, register, bits):
         # Clear the specified bits (using a bit mask) in a register.
-        if register == REG_P0 or register == REG_P1 or register == REG_P2 or register == REG_P3:
+        if register == self.REG_P0 or register == self.REG_P1 or register == self.REG_P2 or register == self.REG_P3:
             for bit in range(8):
                 if (bits & (1 << bit)):
                     self._write_register(register, 0b0000 | (bit & 0b111))
@@ -458,9 +431,9 @@ class BreakoutIOExpander:
     def change_bit(self, register, bit, state):
         # Toggle one register bit
         if(state):
-            set_bit(register, bit)
+            self.set_bit(register, bit)
         else:
-            clear_bit(register, bit)
+            self.clear_bit(register, bit)
     
                 
             
