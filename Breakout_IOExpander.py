@@ -342,13 +342,13 @@ class BreakoutIOExpander:
                 register = self.PxM2[port]
             else:
                 register = self.Px[port]
-            bit = (pin - 1) % 8
-            print("register on line 354 = {}".format(register))
-            
+                
             value = self._read_register(register) & 0xFF
-            print("and the result is:{}".format(bool(value & (1 << bit))))
-            return bool(value & (1 << bit))
-        
+            pinvalue = self.get_bit(register, pin)
+            print("and the result is:{}, register read is {}".format(pinvalue, value))
+            #return bool(value & (1 << bit))
+            return pinvalue
+                  
         elif mode == self.MODE_PWM:
             register = self.PWMH[pin - 1]
             value = self._read_register(register)
@@ -358,7 +358,7 @@ class BreakoutIOExpander:
                 register_l = self.ADCRL[pin - 1]
                 register_h = self.ADCRH[pin - 1]
                 self.clear_bits(self.ADCCON0, 0x0f)
-                print("setting bits on pin {}".format(pin))
+                print("setting ADC bits on pin {}".format(pin))
                 self.set_bits(self.ADCCON0, current_adc_channel)
                 self._write_register(self.AINDIDS, 0)
                 self.set_bit(self.AINDIDS, current_adc_channel)
