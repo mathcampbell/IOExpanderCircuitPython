@@ -49,9 +49,10 @@ class BreakoutIOExpander:
     MASK_P = [0x00, 0x01, -1, 0x03]
     PWML = [0x9a, 0x9b, 0x9c, 0x9d, 0xca, 0xcb]
     PWMH = [0x92, 0x93, 0x94, 0x95, 0xc7, 0xc8]
-    ADCRL = [0x40, 0x42, 0x44, 0x46, 0x48, 0x4A, 0x4C, 0x4E]
-    ADCRH = [0x41, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4D, 0x4F]
-    
+   # ADCRL = [0x40, 0x42, 0x44, 0x46, 0x48, 0x4A, 0x4C, 0x4E]
+   # ADCRH = [0x41, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4D, 0x4F]
+    ADCRH = 0x83
+    ADCRL = 0x82
     REG_P0 = 0x40
     REG_P1 = 0x50
     REG_P2 = 0x60
@@ -141,7 +142,7 @@ class BreakoutIOExpander:
         with self.i2c_device as i2c:
             buffer = bytearray([register]) + bytearray(data)
             i2c.write(buffer)
-            print("Just wrote {}".format(buffer))
+          #  print("Just wrote {}".format(buffer))
     
     def _write_register16(self, reg_l, reg_h, data):
     #"Write two (8+8bit) registers to the device, as a single write if they are consecutive."
@@ -320,7 +321,7 @@ class BreakoutIOExpander:
             13: (0, 7),
             14: (1, 7),
         }
-        if mode == self.MODE_ADC:
+        if mode & self.MODE_ADC:
             current_adc_channel = self.adc_channel[pin]
         
         # Check if the pin number is valid
@@ -344,19 +345,21 @@ class BreakoutIOExpander:
                 register = self.Px[port]
                 
             value = self._read_register(register) & 0xFF
-            pinvalue = self.get_bit(register, pin)
-            print("and the result is:{}, register read is {}".format(pinvalue, value))
+            print("value of the register is {}".format(value))
+            pinvalue = bool(self.get_bit(register, pin))
+            print("and the result is:{}".format(pinvalue))
             #return bool(value & (1 << bit))
+            
             return pinvalue
                   
-        elif mode == self.MODE_PWM:
+        elif mode & self.MODE_PWM:
             register = self.PWMH[pin - 1]
             value = self._read_register(register)
             return value
         
-        elif mode == self.MODE_ADC:
-                register_l = self.ADCRL[pin - 1]
-                register_h = self.ADCRH[pin - 1]
+        elif mode & self.MODE_ADC:
+               # register_l = self.ADCRL[pin - 1]
+               # register_h = self.ADCRH[pin - 1]
                 self.clear_bits(self.ADCCON0, 0x0f)
                 print("setting ADC bits on pin {}".format(pin))
                 self.set_bits(self.ADCCON0, current_adc_channel)
@@ -368,8 +371,8 @@ class BreakoutIOExpander:
                 self.set_bit(self.ADCCON0, 6) #ADCS - sets the ADC conversion start flag
                 
                
-                while not self.get_bit(self.ADCCON0, 7):
-                    time.sleep(0.010)
+               # while not self.get_bit(self.ADCCON0, 7):
+                time.sleep(0.010)
                  
                 high = self._read_register(self.ADCRH)
                 low = self._read_register(self.ADCRL)
@@ -401,7 +404,9 @@ class BreakoutIOExpander:
         return self._get_pin_value(pin, mode)
     
     def get_bit(self, register, bit):
-        return self._read_register(register) & (1 << bit);
+       # return self._read_register(register) & (1 << bit);
+        value = self._read_register(register)
+        return bool(value & (1 << bit))
         
     def set_bit(self, register, bit):
         self.set_bits(register, (1 << bit))
