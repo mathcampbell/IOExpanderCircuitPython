@@ -43,8 +43,8 @@ class BreakoutIOExpander:
     PxM1 = [0x71, 0x73, -1, 0x6c]
     PxM2 = [0x72, 0x74, -1, 0x6d]
     Px = [0x40, 0x50, -1, 0x70]
-    PxS = [0xc2, 0xc4, -1, 0xc0]
-
+    PxS = [0xc2, 0xc4, 0x75, 0xc0]
+    
     
     MASK_P = [0x00, 0x01, -1, 0x03]
     PWML = [0x9a, 0x9b, 0x9c, 0x9d, 0xca, 0xcb]
@@ -142,7 +142,7 @@ class BreakoutIOExpander:
         with self.i2c_device as i2c:
             buffer = bytearray([register]) + bytearray(data)
             i2c.write(buffer)
-          #  print("Just wrote {}".format(buffer))
+            print("Just wrote {}".format(buffer))
     
     def _write_register16(self, reg_l, reg_h, data):
     #"Write two (8+8bit) registers to the device, as a single write if they are consecutive."
@@ -217,11 +217,11 @@ class BreakoutIOExpander:
         self._write_register(IOE_REG_PWM_PERIOD + (channel * 2), [period >> 8, period & 0xFF])
 
     def set_mode(self, pin, mode):
-
+        print("Setting mode for pin {}: {}".format(pin, mode))
         if pin < 1 or pin > 14:
                 raise ValueError("Invalid pin")
 
-        if mode not in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_PWM, self.MODE_ADC]:
+        if mode not in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_IO, self.MODE_PWM, self.MODE_ADC]:
                 raise ValueError("Invalid mode")
 
         if mode == self.MODE_PWM and pin > 6:
@@ -246,65 +246,69 @@ class BreakoutIOExpander:
             13: (0, 7),
             14: (1, 7),
         }
-         # Get the logical pin and port
-        port, pin = pin_map[pin]
-
-        schmitt_state = True
+         # Get the bit and port
+        port, bit = pin_map[pin]
+        
+        print("Port: ", port)
+        print("Bit: ", bit)
+        
+        schmitt_state = self._read_register(self.PxS[port])
+        print("Schmitt state register = {}".format(schmitt_state))
+        print("Scmitt state bit = {}".format(self.get_bit(self.PxS[port], bit)))
         gpio_mode = mode & 0b11;
+        #gpio_mode =(mode >>2) & 0b11
         io_type = (mode >> 2) & 0b11
         initialState = mode >> 4
         
         
         
         if mode == self.MODE_PWM:
-                self._write_register(self.PxM1[port], 0 << pin)
-                self._write_register(self.PxM2[port], 1 << pin)
-                self._write_register(self.PWML[pin - 1], 0xFF)
-                self._write_register(self.PWMH[pin - 1], 0xFF)
+                self._write_register(self.PxM1[port], 0 << bit)
+                self._write_register(self.PxM2[port], 1 << bit)
+                self._write_register(self.PWML[bit - 1], 0xFF)
+                self._write_register(self.PWMH[bit - 1], 0xFF)
        
         pm1 = self._read_register(self.PxM1[port])
         pm2 = self._read_register(self.PxM2[port])
-        pm1 &= 255 - (1 << pin)
-        pm2 &= 255 - (1 << pin)
+        print("PxM1 is: {}, PxM2 is: {}".format(pm1, pm2))
+        pm1 &= 255 - (1 << bit)
+        pm2 &= 255 - (1 << bit)
        
-        pm1 |= (gpio_mode >>1) << pin
-        pm2 |= (gpio_mode & 0b1) << pin
+        pm1 |= (gpio_mode >>1) << bit
+        pm2 |= (gpio_mode & 0b1) << bit
         
+        print("PxM1 is set: {}, PxM2 is set: {}".format(pm1, pm2))
         self._write_register(self.PxM1[port], pm1)
         self._write_register(self.PxM2[port], pm2)
         
-        if mode == self.MODE_INPUT or self.MODE_PULLUP:
-                self.change_bit(self.PxS[port], pin, schmitt_state )
-        self._write_register(self.Px[port], (initialState <<3) | pin)
+        if mode == self.MODE_INPUT or mode == self.MODE_PULLUP:
+                print("PxS[{}]: initial value {}".format(port, self._read_register(self.PxS[port])))
+                self.change_bit(self.PxS[port], bit, 1)
+                print("PxS[{}]: updated value {}".format(port, self._read_register(self.PxS[port])))
+         
         
+        # Clear the bit in the Px[port] register
+        #print("Current register value: ", self._read_register(self.Px[port]))
+       
+       
+        current_value = self._read_register(self.Px[port])
+        print("Current register value: ", current_value)
+        modified_value = current_value & ~(1 << bit)
+        print("modified register value: ", modified_value)
+        #time.sleep(0.01)  # add a short delay
+        #self._write_register(self.Px[port], modified_value)
+        # Set the bit to initialState
+       # self._write_register(self.Px[port], self._read_register(self.Px[port]) | (initialState << bit))
+        self._write_register(self.Px[port], (initialState <<3)|bit)
+        
+        print("Calling get_mode")
+        updated_mode = self._get_mode(pin)
+        print("Mode returns as", updated_mode)
+        
+    def _get_mode(self, pin):
+        if pin < 1 or pin > 14:
+            raise ValueError("Invalid pin")
 
-        
-    def get_pin_mode(self, pin):
-        pin_reg = IOE_REG_GPIO_DIR + (pin // 8)
-        pin_bit = 1 << (pin % 8)
-        config = self._read_register(pin_reg)
-        if config is None or len(config) == 0:
-            return None
-        config = config[0]
-        
-        if (config & pin_bit) != 0:
-            return self.IOE_PIN_OUT
-        elif (config & self.IOE_PIN_PWM) != 0:
-            return self.IOE_PIN_PWM
-        elif (config & self.IOE_PIN_OD) != 0:
-            return self.IOE_PIN_OD
-        elif (config & self.IOE_PIN_IN_PU) != 0:
-            return self.IOE_PIN_IN_PU
-        elif (config & self.IOE_PIN_IN) != 0:
-            return self.IOE_PIN_IN
-        else:
-            return None
-        
-
-    def _get_pin_value(self, pin, mode):
-        print("Calling get_pin_value, pin: {}, mode: {}".format(pin, mode))
-              
-        # Mapping from physical pin number to logical pin and port
         pin_map = {
             1: (1, 5),
             2: (1, 0),
@@ -321,7 +325,44 @@ class BreakoutIOExpander:
             13: (0, 7),
             14: (1, 7),
         }
-        if mode & self.MODE_ADC:
+        
+        port, bit = pin_map[pin]
+        
+        pm1 = self._read_register(self.PxM1[port])
+        pm2 = self._read_register(self.PxM2[port])
+        gpio_mode = (pm2 >> bit) & 0b11
+        io_type = (pm1 >> bit) & 0b11
+        initial_state = (pm1 >> bit) & 0b1
+    
+        mode = gpio_mode | (io_type << 2) | (initial_state << 4)
+        
+        return mode
+
+        
+
+    def _get_pin_value(self, pin, mode):
+        print("Calling get_pin_value, pin: {}, mode: {}".format(pin, mode))
+        print("Calling get_mode")
+        print("Mode returns as {}".format(self._get_mode(pin)))
+              
+        # Mapping from physical pin number to logical bit and port
+        pin_map = {
+            1: (1, 5),
+            2: (1, 0),
+            3: (1, 2),
+            4: (1, 4),
+            5: (0, 0),
+            6: (0, 1),
+            7: (1, 1),
+            8: (0, 3),
+            9: (0, 4),
+            10: (3, 0),
+            11: (0, 6),
+            12: (0, 5),
+            13: (0, 7),
+            14: (1, 7),
+        }
+        if mode == self.MODE_ADC:
             current_adc_channel = self.adc_channel[pin]
         
         # Check if the pin number is valid
@@ -337,16 +378,17 @@ class BreakoutIOExpander:
 
         # Form the register commands
         if mode in [self.MODE_INPUT, self.MODE_OUTPUT, self.MODE_PULLUP, self.MODE_IO]:
-            if port == 3:  # PxM1 is used for Port 3
-                register = self.PxM1[port]
-            elif port == 4:  # PxM2 is used for Port 4
-                register = self.PxM2[port]
-            else:
-                register = self.Px[port]
+#             if port == 3:  # PxM1 is used for Port 3
+#                 register = self.PxM1[port]
+#             elif port == 4:  # PxM2 is used for Port 4
+#                 register = self.PxM2[port]
+#             else:
+            register = self.Px[port]
                 
-            value = self._read_register(register) & 0xFF
-            print("value of the register is {}".format(value))
-            pinvalue = bool(self.get_bit(register, pin))
+            value = self._read_register(register)
+            print("value of the register {} for port {}, bit {} is {}".format(register, port, pin, value))
+            #pinvalue = bool(self.get_bit(register, pin))
+            pinvalue = bool(value & (1 << pin))  # directly calculate the pin value
             print("and the result is:{}".format(pinvalue))
             #return bool(value & (1 << bit))
             
@@ -413,8 +455,10 @@ class BreakoutIOExpander:
         
     def set_bits(self, register, bits):
         value = self._read_register(register)
-        time.sleep(0.05)
+        time.sleep(0.01)
+        print("Setting bits: reg:{}, value:{} | bits {}".format(register, value, bits))
         self._write_register(register, value | bits)
+        print("Bits set:  {}".format(self._read_register(register)))
         
     def clear_bits(self, register, bits):
         # Clear the specified bits (using a bit mask) in a register.
@@ -435,6 +479,7 @@ class BreakoutIOExpander:
         
     def change_bit(self, register, bit, state):
         # Toggle one register bit
+        print("reg:{}, bit:{}, state:{}".format(register, bit, state))
         if(state):
             self.set_bit(register, bit)
         else:
