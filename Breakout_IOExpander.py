@@ -53,6 +53,8 @@ class BreakoutIOExpander:
    # ADCRH = [0x41, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4D, 0x4F]
     ADCRH = 0x83
     ADCRL = 0x82
+    ADCMPL = 0x8e
+    ADCMPH = 0x8f
     REG_P0 = 0x40
     REG_P1 = 0x50
     REG_P2 = 0x60
@@ -84,7 +86,7 @@ class BreakoutIOExpander:
     
     adc_enabled = False
     
-    vref = 5
+    vref = 4.7
     
     adc_channel = {
         7:(7),
@@ -128,9 +130,6 @@ class BreakoutIOExpander:
             data[0] = register
             i2c.write_then_readinto(data, data, out_end=1, in_end=1)
         
-#         if register == self.IOE_REG_ADC_CTRL:
-#             return [(data[0] >> i) & 0x01 for i in range(1)]
-#         else:
             return data[0]
 
     def _read_register12(self, reg_l, reg_h):
@@ -159,12 +158,9 @@ class BreakoutIOExpander:
 
     def _write_register(self, register, data):
         with self.i2c_device as i2c:
-#             buffer = bytearray([register]) + bytearray(data)
-#             i2c.write(buffer)
-#             print("Just wrote {}".format(buffer))
+
             buffer = bytearray([register, data])  # Create a bytearray with register and data
-           # print("write was called for register: {}, data: {}".format(register, data))
-           # print("Just wrote {}".format(buffer))
+
             i2c.write(buffer)
         
     
@@ -241,19 +237,17 @@ class BreakoutIOExpander:
         self._write_register(IOE_REG_PWM_PERIOD + (channel * 2), [period >> 8, period & 0xFF])
 
     def disable_adc(self, pin):
-        #self.clear_bit(self.ADCCON1, 0)
+
         channel = self.adc_channel[pin]
         self.clear_bit(self.AINDIDS, channel)
-        #self._write_register(self.AINDIDS, channel)
-        #self.adc_enabled = False
+
     
     def enable_adc(self, pin):
-        #self.set_bit(self.ADCCON1, 0)
+
         channel = self.adc_channel[pin]
         
         self.set_bit(self.AINDIDS, channel)
         
-        #self.adc_enabled = True
         
         
     def set_mode(self, pin, mode):
@@ -273,53 +267,28 @@ class BreakoutIOExpander:
         # Get the bit and port
         port, bit = self.pin_map[pin]
         
-        print("Port: ", port)
-        print("Bit: ", bit)
+        #print("Port: ", port)
+        #print("Bit: ", bit)
         
         
         schmitt_state = self._read_register(self.PxS[port])
-     #   print("Schmitt state register = {}".format(schmitt_state))
-      #  print("Scmitt state bit = {}".format(self.get_bit(self.PxS[port], bit)))
+
         gpio_mode = mode & 0b11;
-        #gpio_mode =(mode >>2) & 0b11
+ 
         io_type = (mode >> 2) & 0b11
         initialState = mode >> 4
-        
-        
-        
-        if mode == self.MODE_PWM:
-                self._write_register(self.PxM1[port], 0 << bit)
-                self._write_register(self.PxM2[port], 1 << bit)
-                self._write_register(self.PWML[bit - 1], 0xFF)
-                self._write_register(self.PWMH[bit - 1], 0xFF)
-        
-        if mode == self.MODE_ADC:
-            self.enable_adc(pin)
-            
-            
-        
 
        
         pm1 = self._read_register(self.PxM1[port])
         pm2 = self._read_register(self.PxM2[port])
-     #   print("PxM1 (register: {}) value is: {}, PxM2 (register: {}) value is: {}".format(self.PxM1[port], pm1, self.PxM2[port], pm2))
+    
         
-        pm1 &= 255 - (1 << bit)
-        pm2 &= 255 - (1 << bit)
+        pm1 &= ~(1 << bit)
+        pm2 &= ~(1 << bit)
        
-#         pm1 |= (gpio_mode >>1) << bit # removed to test new lines
-#         pm2 |= (gpio_mode & 0b1) << bit
 
-        pm1 |= gpio_mode >> 1
-        pm2 |= gpio_mode & 0b1
-        
-        
-     #   print("mode is {}".format(mode))
-      #  print("io_type is {}".format(io_type))
-      #  print("GPIO mode is {}".format(gpio_mode))
-     #   print("initial state is {}".format(initialState))
-        
-      #  print("PxM1 is set: {}, PxM2 is set: {}".format(pm1, pm2))
+        pm1 |= (gpio_mode >> 1) << bit
+        pm2 |= (gpio_mode & 1) << bit
         
         
         self._write_register(self.PxM1[port], pm1)
@@ -328,7 +297,7 @@ class BreakoutIOExpander:
         newpm1 = self._read_register(self.PxM1[port])
         newpm2 = self._read_register(self.PxM2[port])
         
-       # print("PxM1 now reads: {}, PxM2 now reasd: {}".format(newpm1, newpm2))
+ 
         
         if mode == self.MODE_INPUT or mode == self.MODE_PULLUP:
       
@@ -336,9 +305,14 @@ class BreakoutIOExpander:
        
         # Set the bit to initialState
        
-       
         self._write_register(self.Px[port], (initialState <<3)|bit)
 
+        # Deal with PWM registers
+        if mode == self.MODE_PWM:
+                self._write_register(self.PxM1[port], 0 << bit)
+                self._write_register(self.PxM2[port], 1 << bit)
+                self._write_register(self.PWML[bit - 1], 0xFF)
+                self._write_register(self.PWMH[bit - 1], 0xFF)
         
     def _get_mode(self, pin):
         if pin < 1 or pin > 14:
@@ -391,8 +365,8 @@ class BreakoutIOExpander:
             pinvalue = bool(self.get_bit(register, bit))
             
            
-            if not pinvalue:
-                print ("pin {} is {}".format(pin, pinvalue))
+            #if not pinvalue:
+                #print ("pin {} is {}".format(pin, pinvalue))
             return pinvalue
                   
         elif mode & self.MODE_PWM:
@@ -402,37 +376,42 @@ class BreakoutIOExpander:
         
         elif mode & self.MODE_ADC:
                 current_adc_channel = self.adc_channel[pin]
-                #self.enable_adc(pin)
                 
                 # Enable the ADC circuit
+                self.clear_bits(self.ADCCON0, 0x0f)
                 self.set_bit(self.ADCCON1, 0)
-                
-                #self._write_register(self.AINDIDS, 0)
-                #self.set_bit(self.AINDIDS, current_adc_channel)
-                self.clear_bit(self.ADCCON0, 7)   
+                self.set_bit(self.AINDIDS, 0) 
+                self.enable_adc(pin)
+                 
                 con0value = self._read_register(self.ADCCON0)
-                print("Con0value = {}".format(con0value))
                 con0value = con0value & ~0x0f
                 con0value = con0value | current_adc_channel
                 con0value = con0value & ~(1 << 7)
                 con0value = con0value | (1 << 6)
                 self._write_register(self.ADCCON0, con0value)
                 
+                
+                
                 starttime = time.time()
                 
                 while not (self.get_bit(self.ADCCON0, 7)):
-                    time.sleep(0.010)
+                    time.sleep(0.001)
                     if time.time() - starttime >= 1:
                         return -1
                 
                 reading = self._read_register12(self.ADCRL, self.ADCRH)
-                #self.disable_adc()
+                comparator = self._read_register12(self.ADCMPL, self.ADCMPH)
+
+                self._write_register(self.ADCCON0, 0)
+                self.disable_adc(pin)
                 
                 # Disable the ADC circuit
                 self.clear_bit(self.ADCCON1, 0)
                 
-                print("Reading is: {}".format(reading))
-#                 return (reading / 4095) * self.vref
+                #print("Reading is: {}".format(reading))
+                
+               # return (combined_reading / 65535) * self.vref
+                #return (reading / 4095) * self.vref
                 return reading
 
 
